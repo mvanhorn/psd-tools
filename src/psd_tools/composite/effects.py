@@ -594,7 +594,7 @@ def drop_shadow_bbox(
     interpolation can spill into.
 
     With a ``viewport``, the box is cut to the part that can reach it: the
-    viewport and the viewport moved back against the offset, grown by the same
+    viewport moved back against the integer offset, grown by the same
     margin. Nothing outside lands in the viewport, so a huge size or distance
     does not allocate a canvas for it. The result may be empty. Raises
     :class:`ValueError` when that canvas is over the per-axis limit or
@@ -607,20 +607,23 @@ def drop_shadow_bbox(
         return bbox
     dx, dy = _shadow_offset(distance, angle)
     margin = math.ceil(min(max(size, 0.0), _MAX_SHADOW_SIZE)) + 2
-    grown = (
-        math.floor(bbox[0] + min(dx, 0.0)) - margin,
-        math.floor(bbox[1] + min(dy, 0.0)) - margin,
-        math.ceil(bbox[2] + max(dx, 0.0)) + margin,
-        math.ceil(bbox[3] + max(dy, 0.0)) + margin,
-    )
     if viewport is None:
-        return grown
+        return (
+            math.floor(bbox[0] + min(dx, 0.0)) - margin,
+            math.floor(bbox[1] + min(dy, 0.0)) - margin,
+            math.ceil(bbox[2] + max(dx, 0.0)) + margin,
+            math.ceil(bbox[3] + max(dy, 0.0)) + margin,
+        )
+    grown = (bbox[0] - margin, bbox[1] - margin, bbox[2] + margin, bbox[3] + margin)
     left, top, right, bottom = viewport
+    ix, iy = round(dx), round(dy)
+    # Keep a one-pixel interpolation border on both edges of the read.
+    margin += 1
     reach = (
-        math.floor(min(left, left - dx)) - margin,
-        math.floor(min(top, top - dy)) - margin,
-        math.ceil(max(right, right - dx)) + margin,
-        math.ceil(max(bottom, bottom - dy)) + margin,
+        left - ix - margin,
+        top - iy - margin,
+        right - ix + margin,
+        bottom - iy + margin,
     )
     clipped = (
         max(grown[0], reach[0]),
@@ -706,6 +709,7 @@ def draw_drop_shadow(
     angle: float,
     size: float,
     spread: float,
+    integer_offset: tuple[int, int] = (0, 0),
 ) -> np.ndarray:
     """The coverage a drop shadow casts from ``shape``, on ``viewport``.
 
@@ -758,6 +762,8 @@ def draw_drop_shadow(
             alpha, sigma, mode="constant", cval=0.0, truncate=radius / sigma
         )
     dx, dy = _shadow_offset(distance, angle)
+    dx -= integer_offset[0]
+    dy -= integer_offset[1]
     if dx or dy:
         alpha = ndimage.shift(alpha, (dy, dx), order=1, mode="constant", cval=0.0)
     return np.clip(alpha, 0.0, 1.0)[:, :, None]

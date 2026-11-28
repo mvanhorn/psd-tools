@@ -148,7 +148,8 @@ def test_drop_shadow_bbox_holds_the_layer_and_the_cast_shadow() -> None:
     """The canvas grows by the size on every side and by the offset on one."""
     bbox = (10, 20, 30, 40)
     assert effects.drop_shadow_bbox(bbox, 5.0, 90.0, 3.0) == (5, 15, 35, 50)
-    assert effects.drop_shadow_bbox(bbox, 5.0, 0.0, 3.0) == (0, 15, 35, 45)
+    viewport = (0, 0, 100, 100)
+    assert effects.drop_shadow_bbox(bbox, 5.0, 0.0, 3.0, viewport) == (5, 15, 35, 45)
     assert effects.drop_shadow_bbox((0, 0, 0, 0), 5.0, 90.0, 3.0) == (0, 0, 0, 0)
 
 
@@ -791,10 +792,21 @@ def test_a_huge_size_does_not_grow_the_shadow_canvas(blur: float) -> None:
     )
 
 
-def test_a_distant_shadow_does_not_grow_the_canvas_by_its_distance() -> None:
-    box = (17, 20, 180, 183)
-    bbox = effects.drop_shadow_bbox(box, 30000.0, 0.0, 5.0, (0, 0, 200, 200))
-    assert (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) < 1000 * 1000
+@pytest.mark.parametrize("angle, direction", [(0.0, 1), (180.0, -1)])
+def test_a_distant_shadow_does_not_grow_the_canvas_by_its_distance(
+    angle: float, direction: int
+) -> None:
+    psd = PSDImage.new("RGB", (200, 200))
+    psd.max_alloc_bytes = 4 << 20
+    image = Image.new("RGBA", (20, 20), "white")
+    viewport = (40, 40, 60, 60)
+    nearby = psd.create_pixel_layer(image, top=50, left=45 + direction * 100)
+    _forge_shadow(nearby, angle=angle, Distance=100.5, Blur=5.0)
+    reference = _alone(nearby, psd.viewbox)[40:60, 40:60]
+    assert reference.max() > 0
+    distant = psd.create_pixel_layer(image, top=50, left=45 + direction * 30000)
+    _forge_shadow(distant, angle=angle, Distance=30000.5, Blur=5.0)
+    np.testing.assert_allclose(_alone(distant, viewport), reference, atol=1e-6)
 
 
 def test_a_layer_whose_shadow_cannot_reach_the_viewport_gets_no_canvas() -> None:

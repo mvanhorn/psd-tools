@@ -31,6 +31,7 @@ from psd_tools.composite import feather, paint, utils, vector
 from psd_tools.composite.adjustments import ADJUSTMENT_FUNC
 from psd_tools.composite.blend import get_blend_func, normal
 from psd_tools.composite.effects import (
+    _shadow_offset,
     draw_drop_shadow,
     draw_stroke_effect_split,
     drop_shadow_bbox,
@@ -3063,6 +3064,8 @@ class Compositor:
                 continue
             silhouette = self._cast_shape(layer, bbox)
             try:
+                dx, dy = _shadow_offset(distance, angle)
+                ix, iy = round(dx), round(dy)
                 coverage = draw_drop_shadow(
                     bbox,
                     silhouette,
@@ -3070,6 +3073,7 @@ class Compositor:
                     angle=angle,
                     size=size,
                     spread=spread,
+                    integer_offset=(ix, iy),
                 )
                 color, _ = paint.draw_solid_color_fill(
                     self._viewport, layer._psd.color_mode, shadow.descriptor
@@ -3077,13 +3081,24 @@ class Compositor:
             except _UNREADABLE as error:
                 logger.debug("Cannot draw a drop shadow of %s: %s", layer, error)
                 continue
+            destination = (bbox[0] + ix, bbox[1] + iy, bbox[2] + ix, bbox[3] + iy)
             if knocks_out:
-                coverage = coverage * _knockout_survival(
+                visible = utils.intersect(destination, self._viewport)
+                if visible == (0, 0, 0, 0):
+                    continue
+                coverage = paste(visible, destination, coverage)
+                caster = utils.intersect(visible, cast_from)
+                if utils.intersect(caster, bbox) == caster:
+                    silhouette = paste(visible, bbox, silhouette)
+                else:
+                    silhouette = self._cast_shape(layer, visible)
+                coverage *= _knockout_survival(
                     silhouette,
                     fill_opacity * opacity,
-                    self._stroke_effect_cut(layer, bbox, silhouette),
+                    self._stroke_effect_cut(layer, visible, silhouette),
                 )
-            coverage = paste(self._viewport, bbox, coverage)
+                destination = visible
+            coverage = paste(self._viewport, destination, coverage)
             if coverage.any():
                 self._apply_source(
                     color, coverage, coverage * effect_opacity * opacity, blend_mode
